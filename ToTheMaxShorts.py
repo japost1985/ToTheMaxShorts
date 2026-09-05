@@ -408,15 +408,12 @@ def assemble_video(image_paths, audio_path: Path, out_path: Path,
     per_image = audio_dur / n
 
     # Build filter complex
-    inputs = [str(p) for p in image_paths] + [str(audio_path)]
-    if bg_music_path:
-        inputs.append(str(bg_music_path))
-
     filter_parts = []
     for i in range(n):
-        # Each image: scale + zoompan for motion
+        # Each image: force RGB (drop alpha), force even dims, scale, zoompan
         filter_parts.append(
-            f"[{i}:v]scale={VIDEO_W*2}:{VIDEO_H*2},"
+            f"[{i}:v]format=yuv420p,scale={VIDEO_W*2}:{VIDEO_H*2}:"
+            f"force_original_aspect_ratio=increase,crop={VIDEO_W*2}:{VIDEO_H*2},"
             f"zoompan=z='min(zoom+0.0015,1.15)':d={int(per_image*25)}:"
             f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
             f"s={VIDEO_W}x{VIDEO_H}:fps=25[v{i}];"
@@ -455,7 +452,16 @@ def assemble_video(image_paths, audio_path: Path, out_path: Path,
 
     full_filter = "".join(filter_parts) + audio_mix + ";" + concat
 
-    cmd = [ffmpeg, "-y"] + sum([["-i", p] for p in inputs], []) + [
+    cmd = [ffmpeg, "-y"]
+    # Image inputs need -loop 1 so ffmpeg treats them as video streams
+    for p in image_paths:
+        cmd += ["-loop", "1", "-t", str(audio_dur + 1), "-framerate", "25", "-i", str(p)]
+    # Audio input
+    cmd += ["-i", str(audio_path)]
+    if bg_music_path:
+        cmd += ["-i", str(bg_music_path)]
+
+    cmd += [
         "-filter_complex", full_filter,
         "-map", "[vfinal]" if subtitle_chunks else "[vout]",
         "-map", "[audio_out]" if bg_music_path else f"[{n}:a]",
@@ -488,8 +494,8 @@ class ToTheMaxApp:
         self.subtopic_var = StringVar()
         self.openai_key_var = StringVar()
         self.openrouter_key_var = StringVar()
-        self.claude_model_var = StringVar(value="anthropic/claude-3-haiku")
-        self.opencode_model_var = StringVar(value="google/gemini-2.0-flash-exp:free")
+        self.claude_model_var = StringVar(value="anthropic/claude-sonnet-5")
+        self.opencode_model_var = StringVar(value="minimax/minimax-m3:free")
         self.use_ai_images = BooleanVar(value=False)
         self.use_ai_tts = BooleanVar(value=False)
         self.use_subtitles = BooleanVar(value=True)
