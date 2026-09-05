@@ -61,9 +61,21 @@ python ToTheMaxShorts.py
 | Opencode (OpenRouter) | any OpenRouter model | offline TTS | stock/picsum | varies |
 
 Both Claude and Opencode use the **OpenRouter** API endpoint and a single
-OpenRouter key — only the model slug changes (e.g.,
-`anthropic/claude-3-haiku`, `google/gemini-2.0-flash-exp:free`,
-`meta-llama/llama-3.1-8b-instruct:free`).
+OpenRouter key — only the model slug changes.
+
+**Default model slugs (verified against OpenRouter's current catalog):**
+- Claude: `anthropic/claude-sonnet-5`
+- Opencode: `minimax/minimax-m3:free` (free tier)
+
+**Other working free models you can paste into the model field:**
+- `meta-llama/llama-4-scout`
+- `mistralai/mistral-small-2603`
+- `google/gemini-3.7-flash`
+- `liquid/lfm-2.5-2.6b:free`
+- `nvidia/nemotron-3-5-lightning:free`
+- `google/gemma-4-26b-a4b-it:free`
+
+Browse the full live list at https://openrouter.ai/models.
 
 ## Output
 
@@ -77,7 +89,12 @@ Videos are saved under:
 - **"ffmpeg not found"** — install ffmpeg and ensure it's on PATH.
 - **Pillow not installed** — `pip install Pillow`
 - **pyttsx3 voice install (Linux):** `sudo apt install espeak`
-- **400 error from OpenRouter** — verify the model slug is in
-  https://openrouter.ai/models and your key is valid.
-- **DALL-E blocked** — some OpenAI accounts need extra verification to
-  use image generation.
+- **400 / 404 error from OpenRouter** — verify the model slug exists
+  in https://openrouter.ai/models and your key is valid. Some older
+  slugs (`claude-3-haiku`, `gemini-2.0-flash-exp`) have been retired.
+- **ffmpeg build dump / "able-libvpx"** — this usually means the
+  real error is earlier in stderr. The app now auto-detects a system
+  font for subtitles and reports the actual error line. If you still
+  see a dump, try **disabling subtitles** (uncheck "Add burned-in
+  subtitles") to isolate whether drawtext is the cause.
+- **Linux subtitle font missing** — `sudo apt install fonts-dejavu`
