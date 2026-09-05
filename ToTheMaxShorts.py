@@ -391,6 +391,51 @@ def get_audio_duration(audio_path: Path):
         return 30.0  # fallback
 
 
+def find_system_font():
+    """Return path to a TTF font that ffmpeg's drawtext can use, or None."""
+    candidates = []
+    if platform.system() == "Windows":
+        win_fonts = Path("C:/Windows/Fonts")
+        candidates += [
+            win_fonts / "arial.ttf", win_fonts / "segoeui.ttf",
+            win_fonts / "verdana.ttf", win_fonts / "tahoma.ttf",
+        ]
+    else:
+        candidates += [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+            "/usr/share/fonts/TTF/DejaVuSans-Bold.ttf",
+        ]
+    for c in candidates:
+        if Path(c).exists():
+            return str(c)
+    return None
+
+
+def _extract_real_ffmpeg_error(stderr: str) -> str:
+    """Pull the meaningful error line out of ffmpeg's stderr dump."""
+    if not stderr:
+        return "ffmpeg failed with no stderr output"
+    keywords = ("error", "Error", "ERROR", "Invalid", "No such", "Unable",
+                "not found", "could not", "failed", "Missing")
+    for line in stderr.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if s.startswith("--"):
+            continue
+        if any(k in s for k in keywords):
+            return s
+    # Fall back to last non-config line
+    for line in reversed(stderr.splitlines()):
+        s = line.strip()
+        if s and not s.startswith("--"):
+            return s
+    return stderr[-500:]
+
+
 def assemble_video(image_paths, audio_path: Path, out_path: Path,
                    subtitle_chunks=None, bg_music_path: Path = None):
     """Concatenate images with ken-burns pan, add audio and optional subtitles.
@@ -406,6 +451,8 @@ def assemble_video(image_paths, audio_path: Path, out_path: Path,
     if n == 0:
         raise RuntimeError("No images to assemble")
     per_image = audio_dur / n
+
+    font_path = find_system_font() if subtitle_chunks else None
 
     # Build filter complex
     filter_parts = []
@@ -429,7 +476,6 @@ def assemble_video(image_paths, audio_path: Path, out_path: Path,
             f"[audio_main][audio_bg]amix=inputs=2:duration=first[audio_out]"
         )
 
-    subtitle_filter = ""
     if subtitle_chunks:
         # Render each chunk as a drawtext for the proportional slice of time
         drawtext_cmds = []
@@ -437,10 +483,14 @@ def assemble_video(image_paths, audio_path: Path, out_path: Path,
         for i, chunk in enumerate(chunks):
             start = i * (audio_dur / len(chunks))
             end = (i + 1) * (audio_dur / len(chunks))
-            # Escape single quotes for drawtext
-            safe = chunk.replace(":", "\\:").replace("'", "\\'")
+            # Escape single quotes, colons, percent signs, and backslashes for drawtext
+            safe = (chunk.replace("\\", "\\\\")
+                        .replace("'", "\\'")
+                        .replace(":", "\\:")
+                        .replace("%", "\\%"))
+            font_part = f"fontfile='{font_path}':" if font_path else ""
             drawtext_cmds.append(
-                f"drawtext=text='{safe}':"
+                f"drawtext={font_part}text='{safe}':"
                 f"fontcolor=white:fontsize=64:box=1:boxcolor=black@0.6:boxborderw=20:"
                 f"x=(w-text_w)/2:y=h-280:"
                 f"enable='between(t,{start:.2f},{end:.2f})'"
@@ -452,7 +502,7 @@ def assemble_video(image_paths, audio_path: Path, out_path: Path,
 
     full_filter = "".join(filter_parts) + audio_mix + ";" + concat
 
-    cmd = [ffmpeg, "-y"]
+    cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error"]
     # Image inputs need -loop 1 so ffmpeg treats them as video streams
     for p in image_paths:
         cmd += ["-loop", "1", "-t", str(audio_dur + 1), "-framerate", "25", "-i", str(p)]
@@ -472,9 +522,10 @@ def assemble_video(image_paths, audio_path: Path, out_path: Path,
     ]
 
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"ffmpeg failed: {e.stderr[-1000:]}")
+        err = _extract_real_ffmpeg_error(e.stderr or "")
+        raise RuntimeError(f"ffmpeg failed: {err}")
 
 
 # ---------------------------------------------------------------------------
